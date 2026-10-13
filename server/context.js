@@ -62,6 +62,17 @@ export function buildContext(db, { from, to, comparison = false }) {
   };
 }
 
+export function buildEvaluationContext(db, { from, to }) {
+  const context = buildContext(db, { from, to, comparison: true });
+  const goals = db.prepare('SELECT id,title,dimension,description,created_at AS createdAt FROM progress_goals WHERE archived=0 ORDER BY created_at,id').all()
+    .map(goal => ({ ...goal, observations: db.prepare('SELECT id,observed_at AS date,status,note,activity_id AS activityId FROM progress_observations WHERE goal_id=? AND observed_at<=? ORDER BY observed_at,id').all(goal.id, to) }));
+  return {
+    ...context,
+    goals,
+    sourceIds: [...new Set([...context.sourceIds, ...goals.flatMap(goal => goal.observations.map(observation => observation.id))])]
+  };
+}
+
 function chineseNumber(raw) {
   if (/^\d+$/.test(raw)) return Number(raw);
   const digits = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };

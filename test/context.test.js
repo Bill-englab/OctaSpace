@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { openStore } from '../server/db.js';
 import { saveActivity, saveDiary, saveGoal, saveObservation } from '../server/records.js';
-import { buildContext, inferRange } from '../server/context.js';
+import { buildContext, buildEvaluationContext, inferRange } from '../server/context.js';
 
 test('context includes selected records and an equal-length previous period', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'journal-context-'));
@@ -39,4 +39,18 @@ test('relative Chinese time expressions resolve against the local reference date
   assert.deepEqual(inferRange('总结上周的情绪', '2026-10-12'), { from: '2026-10-05', to: '2026-10-11' });
   assert.deepEqual(inferRange('最近三个月有什么变化', '2026-10-12'), { from: '2026-07-13', to: '2026-10-12' });
   assert.equal(inferRange('孩子喜欢什么？', '2026-10-12'), null);
+});
+
+test('evaluation context keeps family goals even when the selected range has no entries', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'journal-evaluation-context-'));
+  const store = openStore(dir);
+  try {
+    const db = store.db;
+    const goal = saveGoal(db, { title: '主动表达', dimension: '语言表达', categoryId: 'english' });
+    saveObservation(db, { goalId: goal.id, status: 'practicing', observedAt: '2026-09-02', note: '会跟读' });
+    const context = buildEvaluationContext(db, { from: '2026-10-01', to: '2026-10-13' });
+    assert.equal(context.records.length, 0);
+    assert.equal(context.goals[0].title, '主动表达');
+    assert.equal(context.goals[0].observations[0].note, '会跟读');
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
