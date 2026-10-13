@@ -97,6 +97,12 @@ export function openStore(dataDir) {
   if (!db.prepare('PRAGMA table_info(diary_entries)').all().some(column => column.name === 'occurred_at')) {
     db.exec("ALTER TABLE diary_entries ADD COLUMN occurred_at TEXT NOT NULL DEFAULT ''");
   }
+  if (!db.prepare('PRAGMA table_info(evaluations)').all().some(column => column.name === 'report_json')) {
+    db.exec('ALTER TABLE evaluations ADD COLUMN report_json TEXT');
+  }
+  if (!db.prepare('PRAGMA table_info(evaluations)').all().some(column => column.name === 'reference_version')) {
+    db.exec('ALTER TABLE evaluations ADD COLUMN reference_version TEXT');
+  }
   db.exec("UPDATE diary_entries SET occurred_at=created_at WHERE occurred_at=''");
   const insertCategory = db.prepare('INSERT OR IGNORE INTO categories(id,name,dimension,color,sort_order) VALUES (?,?,?,?,?)');
   DEFAULT_CATEGORIES.forEach((row, index) => insertCategory.run(...row, index));

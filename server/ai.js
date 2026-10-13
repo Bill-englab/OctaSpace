@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
-import { buildContext, inferRange } from './context.js';
+import { buildContext, buildEvaluationContext, inferRange } from './context.js';
 import { ProviderError, sendModel } from './providers.js';
+import { getAgeReference } from './age-reference.js';
+import { evaluationPrompt, parseEvaluation } from './evaluation-report.js';
 
 function todayLocal() { return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }); }
 function dateBefore(day, days) { return new Date(Date.parse(`${day}T00:00:00Z`) - days * 86400000).toISOString().slice(0, 10); }
@@ -26,7 +28,7 @@ function cleanOutput(raw, allowedIds) {
 
 async function contextForModel(config, context, fetchImpl) {
   const all = [...context.records, ...context.comparisonRecords];
-  if (all.length <= 60) return JSON.stringify({ profile: context.profile, coverage: context.coverage, records: context.records, comparisonRecords: context.comparisonRecords });
+  if (all.length <= 60) return JSON.stringify({ profile: context.profile, goals: context.goals ?? [], coverage: context.coverage, records: context.records, comparisonRecords: context.comparisonRecords });
   const chunks = [];
   for (let index = 0; index < all.length; index += 50) {
     const group = all.slice(index, index + 50);
@@ -36,7 +38,7 @@ async function contextForModel(config, context, fetchImpl) {
     }, fetchImpl);
     chunks.push({ sourceIds: group.map(x => x.id), summary });
   }
-  return JSON.stringify({ profile: context.profile, coverage: context.coverage, compressedGroups: chunks });
+  return JSON.stringify({ profile: context.profile, goals: context.goals ?? [], coverage: context.coverage, compressedGroups: chunks });
 }
 
 function sourceInstruction() {
@@ -100,22 +102,27 @@ export async function askChildQuestion(db, config, input, fetchImpl = fetch) {
 }
 
 export function listEvaluations(db) {
-  return db.prepare('SELECT id,from_date AS fromDate,to_date AS toDate,content,sources_json AS sourcesJson,coverage_json AS coverageJson,model,created_at AS createdAt FROM evaluations ORDER BY created_at DESC').all()
-    .map(x => ({ ...x, sources: JSON.parse(x.sourcesJson), coverage: JSON.parse(x.coverageJson), sourcesJson: undefined, coverageJson: undefined }));
+  return db.prepare('SELECT id,from_date AS fromDate,to_date AS toDate,content,sources_json AS sourcesJson,coverage_json AS coverageJson,model,created_at AS createdAt,report_json AS reportJson,reference_version AS referenceVersion FROM evaluations ORDER BY created_at DESC').all()
+    .map(x => ({ ...x, sources: JSON.parse(x.sourcesJson), coverage: JSON.parse(x.coverageJson), report: x.reportJson ? JSON.parse(x.reportJson) : null, sourcesJson: undefined, coverageJson: undefined, reportJson: undefined }));
 }
 
 export async function generateEvaluation(db, config, input, fetchImpl = fetch) {
-  const context = buildContext(db, { from: input.from, to: input.to, comparison: true });
-  if (context.records.length === 0) throw Object.assign(new Error('所选时段没有记录，请先记录活动或日记'), { status: 422 });
+  const context = buildEvaluationContext(db, { from: input.from, to: input.to });
+  if (!context.profile.birthday) throw Object.assign(new Error('请先在设置中填写孩子生日，才能结合年龄评估'), { status: 422 });
+  if (!context.records.length && !context.goals.length && !context.profile.focus && !context.profile.baseline) {
+    throw Object.assign(new Error('请先补充孩子的目标、已有基础或活动记录'), { status: 422 });
+  }
+  const ageReference = getAgeReference(context.profile.birthday, input.to) ?? { ageLabel: context.profile.age || '年龄未知', version: 'age-reference-unavailable', items: [] };
   const recordContext = await contextForModel(config, context, fetchImpl);
   const raw = await sendModel(config, {
-    system: `${sourceInstruction()}\n请按当前观察、与前一等长时段的变化、记录不足之处、接下来 2–4 周活动建议、下次回顾观察点组织回答。年龄仅作背景，不给标准化发育评分。\n孩子资料与记录：${recordContext}`,
+    system: evaluationPrompt(context, ageReference, recordContext),
     messages: [{ role: 'user', content: `请评估 ${input.from} 至 ${input.to} 的成长记录。` }], maxTokens: 8192, timeoutMs: 360000
   }, fetchImpl);
-  const { content, sources } = cleanOutput(raw, context.sourceIds);
+  const { report, sources } = parseEvaluation(raw, { sourceIds: context.sourceIds, ageReference });
+  const content = report.summary.judgement;
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  db.prepare('INSERT INTO evaluations(id,from_date,to_date,content,sources_json,coverage_json,model,created_at) VALUES (?,?,?,?,?,?,?,?)')
-    .run(id, input.from, input.to, content, JSON.stringify(sources), JSON.stringify(context.coverage), config.model, createdAt);
-  return { id, fromDate: input.from, toDate: input.to, content, sources, coverage: context.coverage, model: config.model, createdAt };
+  db.prepare('INSERT INTO evaluations(id,from_date,to_date,content,sources_json,coverage_json,model,created_at,report_json,reference_version) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(id, input.from, input.to, content, JSON.stringify(sources), JSON.stringify(context.coverage), config.model, createdAt, JSON.stringify(report), ageReference.version);
+  return { id, fromDate: input.from, toDate: input.to, content, sources, coverage: context.coverage, model: config.model, createdAt, report, referenceVersion: ageReference.version };
 }

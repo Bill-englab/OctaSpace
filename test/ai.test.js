@@ -15,6 +15,18 @@ async function setup(run) {
 }
 
 const config = { format: 'openai', baseUrl: 'https://maas.example/v1', model: 'demo', apiKey: 'secret' };
+const dimensionIds = ['de', 'zhi', 'ti', 'mei', 'lao'];
+function structuredReport(recordIds = []) {
+  return {
+    summary: { judgement: '示例判断', priority: '先关注主动表达' },
+    familyPlan: { strengths: '交流环境丰富', adjustment: '多给孩子自主表达机会', recordIds, profileFields: ['focus'] },
+    dimensions: dimensionIds.map(id => ({ id, status: id === 'zhi' ? 'supported' : 'unknown', verdict: `${id}领域观察`, ageContext: '四岁阶段可在游戏中观察', known: id === 'zhi' ? '已有记录' : '尚未了解', gap: '继续了解与家庭目标的关系', question: '平时会怎样表现？', recordIds, profileFields: ['baseline'], referenceIds: ['zhi-talk', 'made-up-reference'] })),
+    gaps: [{ title: '表达机会', explanation: '需要观察孩子是否主动说', recordIds }],
+    actions: [{ title: '游戏中对话', why: '贴近家庭目标', activity: '玩积木时轮流讲故事', guidance: '等待孩子开口', signal: '孩子主动解释', alternative: '换成喜欢的游戏', recordIds }],
+    followUpQuestions: ['孩子会主动讲一件事吗？'],
+    limits: '资料不足的维度暂不判断'
+  };
+}
 
 test('chat uses selected records and links only real source IDs', () => setup(async db => {
   const activity = saveActivity(db, { categoryId: 'sports', occurredAt: '2026-10-12T16:20:00+08:00', localDate: '2026-10-12', note: '独立绕过障碍' });
@@ -32,16 +44,30 @@ test('chat uses selected records and links only real source IDs', () => setup(as
 
 test('evaluation is saved as a stable on-demand report with range and sources', () => setup(async db => {
   const activity = saveActivity(db, { categoryId: 'english', occurredAt: '2026-10-12T11:00:00+08:00', localDate: '2026-10-12', note: '主动说完整句子' });
-  const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ answer: '语言表达有新尝试。下周继续观察主动表达。', sourceIds: [activity.id] }) } }] }), { status: 200 });
+  db.prepare('UPDATE child_profile SET birthday=?,focus=? WHERE id=1').run('2022-09-25', '主动表达');
+  let sent;
+  const fetchImpl = async (_url, options) => {
+    sent = JSON.parse(options.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(structuredReport([activity.id, 'fabricated'])) } }] }), { status: 200 });
+  };
   const report = await generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-30' }, fetchImpl);
   assert.deepEqual(report.sources, [activity.id]);
   assert.equal(report.coverage.comparison.from, '2026-09-01');
   assert.equal(listEvaluations(db).length, 1);
   assert.equal(listEvaluations(db)[0].content, report.content);
+  assert.equal(report.report.dimensions.length, 5);
+  assert.equal(report.report.dimensions[0].referenceIds.includes('made-up-reference'), false);
+  assert.equal(report.referenceVersion, 'four-years-2026-10');
+  assert.equal(report.report.ageLabel, '4岁1个月');
+  assert.ok(report.report.references.some(item => item.id === 'zhi-talk'));
+  assert.match(sent.messages[0].content, /未记录不等于没做/);
+  assert.match(sent.messages[0].content, /家庭目标/);
+  assert.match(sent.messages[0].content, /四岁阶段/);
 }));
 
 test('failed MaaS call keeps the user question but saves no report', () => setup(async db => {
   saveActivity(db, { categoryId: 'sports', occurredAt: '2026-10-12T16:20:00+08:00', localDate: '2026-10-12', note: '骑车' });
+  db.prepare('UPDATE child_profile SET birthday=? WHERE id=1').run('2022-09-25');
   const fetchImpl = async () => new Response('{}', { status: 429 });
   await assert.rejects(askChildQuestion(db, config, { question: '本周如何？', today: '2026-10-12' }, fetchImpl), /频繁/);
   const row = db.prepare('SELECT status FROM chat_messages WHERE role=?').get('user');
@@ -52,6 +78,7 @@ test('failed MaaS call keeps the user question but saves no report', () => setup
 
 test('evaluation allows a longer response and enough output for a reasoning model', () => setup(async db => {
   saveActivity(db, { categoryId: 'english', occurredAt: '2026-10-12T11:00:00+08:00', localDate: '2026-10-12', note: '主动说完整句子' });
+  db.prepare('UPDATE child_profile SET birthday=? WHERE id=1').run('2022-09-25');
   const original = AbortSignal.timeout;
   let requestedTimeout;
   let requestedTokens;
@@ -59,7 +86,7 @@ test('evaluation allows a longer response and enough output for a reasoning mode
   try {
     const fetchImpl = async (_url, options) => {
       requestedTokens = JSON.parse(options.body).max_tokens;
-      return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"answer":"观察完成","sourceIds":[]}' } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(structuredReport()) } }] }), { status: 200 });
     };
     await generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-30' }, fetchImpl);
     assert.ok(requestedTimeout >= 180000);
@@ -69,7 +96,32 @@ test('evaluation allows a longer response and enough output for a reasoning mode
 
 test('evaluation does not save an incomplete JSON response', () => setup(async db => {
   saveActivity(db, { categoryId: 'sports', occurredAt: '2026-10-12T16:20:00+08:00', localDate: '2026-10-12', note: '骑车' });
+  db.prepare('UPDATE child_profile SET birthday=? WHERE id=1').run('2022-09-25');
   const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"answer":"【当前观察】（基于' } }] }), { status: 200 });
   await assert.rejects(generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-30' }, fetchImpl), /截断|不完整/);
   assert.equal(listEvaluations(db).length, 0);
+}));
+
+test('evaluation can use family baseline without requiring selected-period records', () => setup(async db => {
+  db.prepare('UPDATE child_profile SET birthday=?,baseline=?,focus=? WHERE id=1').run('2022-09-25', '喜欢搭积木', '解决问题');
+  const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(structuredReport()) } }] }), { status: 200 });
+  const evaluation = await generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-13' }, fetchImpl);
+  assert.equal(evaluation.coverage.recordCount, 0);
+  assert.equal(evaluation.report.summary.judgement, '示例判断');
+}));
+
+test('evaluation rejects a report missing a developmental dimension', () => setup(async db => {
+  db.prepare('UPDATE child_profile SET birthday=?,focus=? WHERE id=1').run('2022-09-25', '运动');
+  const response = structuredReport(); response.dimensions.pop();
+  const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }] }), { status: 200 });
+  await assert.rejects(generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-13' }, fetchImpl), /五个维度|格式/);
+  assert.equal(listEvaluations(db).length, 0);
+}));
+
+test('older plain-text evaluations remain readable', () => setup(async db => {
+  db.prepare('INSERT INTO evaluations(id,from_date,to_date,content,model,created_at) VALUES (?,?,?,?,?,?)')
+    .run('legacy', '2026-09-01', '2026-09-30', '旧版原文', 'demo', '2026-10-01T00:00:00Z');
+  const older = listEvaluations(db)[0];
+  assert.equal(older.content, '旧版原文');
+  assert.equal(older.report, null);
 }));

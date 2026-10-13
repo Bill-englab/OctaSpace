@@ -17,6 +17,8 @@ test('backup restores records and media without exporting secrets', () => {
       .run('a1', 'english', '2026-10-12T10:00:00Z', '2026-10-12', '', '主动说了一句话', '2026-10-12T10:00:00Z', '2026-10-12T10:00:00Z');
     fs.writeFileSync(path.join(first.mediaDir, 'm1.png'), Buffer.from('picture'));
     first.db.prepare('INSERT INTO media_assets(id,activity_id,filename,mime,bytes,created_at) VALUES (?,?,?,?,?,?)').run('m1', 'a1', 'm1.png', 'image/png', 7, '2026-10-12T10:00:00Z');
+    first.db.prepare('INSERT INTO evaluations(id,from_date,to_date,content,model,created_at,report_json,reference_version) VALUES (?,?,?,?,?,?,?,?)')
+      .run('e1', '2026-10-01', '2026-10-12', '示例判断', 'demo', '2026-10-12T10:00:00Z', '{"summary":{"judgement":"示例判断"}}', 'four-years-2026-10');
     const backup = exportBackup(first.db, first.mediaDir);
     assert.equal(JSON.stringify(backup).includes('hidden-secret'), false);
     assert.equal(backup.version, 2);
@@ -27,6 +29,7 @@ test('backup restores records and media without exporting secrets', () => {
     assert.equal(second.db.prepare('SELECT name FROM child_profile WHERE id=1').get().name, '小树');
     assert.equal(second.db.prepare('SELECT note FROM activities WHERE id=?').get('a1').note, '主动说了一句话');
     assert.equal(fs.readFileSync(path.join(second.mediaDir, 'm1.png'), 'utf8'), 'picture');
+    assert.equal(second.db.prepare('SELECT reference_version FROM evaluations WHERE id=?').get('e1').reference_version, 'four-years-2026-10');
   } finally { first.close(); second.close(); fs.rmSync(firstDir, { recursive: true, force: true }); fs.rmSync(secondDir, { recursive: true, force: true }); }
 });
 
@@ -42,6 +45,7 @@ test('a version 1 backup remains importable after adding projects', () => {
     delete old.tables.projects;
     old.tables.activities.forEach(row => delete row.project_id);
     old.tables.diary_entries.forEach(row => delete row.occurred_at);
+    old.tables.evaluations.forEach(row => { delete row.report_json; delete row.reference_version; });
     importBackup(second.db, second.mediaDir, old);
     assert.equal(second.db.prepare("SELECT count(*) AS n FROM projects WHERE category_id='english'").get().n, 2);
     assert.equal(second.db.prepare("SELECT COALESCE(NULLIF(occurred_at,''),created_at) AS event_time FROM diary_entries WHERE id='legacy-diary'").get().event_time, '2026-10-12T09:15:00Z');
