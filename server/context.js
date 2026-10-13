@@ -22,14 +22,14 @@ function ageAt(birthday, onDate) {
 }
 
 function collect(db, from, to) {
-  const activities = db.prepare(`SELECT a.id,a.local_date AS date,a.title,a.note,a.mood,a.duration_minutes AS durationMinutes,
+  const activities = db.prepare(`SELECT a.id,a.local_date AS date,a.occurred_at AS occurredAt,a.title,a.note,a.mood,a.duration_minutes AS durationMinutes,
     a.details_json AS detailsJson,c.name AS category,p.name AS project FROM activities a
     JOIN categories c ON c.id=a.category_id LEFT JOIN projects p ON p.id=a.project_id
     WHERE a.local_date BETWEEN ? AND ?`).all(from, to).map(x => ({
-    id: x.id, type: 'activity', date: x.date, category: x.category, project: x.project, title: x.title,
+    id: x.id, type: 'activity', date: x.date, occurredAt: x.occurredAt, category: x.category, project: x.project, title: x.title,
     note: x.note, mood: x.mood, durationMinutes: x.durationMinutes, details: JSON.parse(x.detailsJson || '{}')
   }));
-  const diaries = db.prepare('SELECT id,local_date AS date,text,mood FROM diary_entries WHERE local_date BETWEEN ? AND ?').all(from, to)
+  const diaries = db.prepare("SELECT id,local_date AS date,COALESCE(NULLIF(occurred_at,''),created_at) AS occurredAt,text,mood FROM diary_entries WHERE local_date BETWEEN ? AND ?").all(from, to)
     .map(x => ({ ...x, type: 'diary' }));
   const progress = db.prepare(`SELECT o.id,o.observed_at AS date,o.status,o.note,o.activity_id AS activityId,
     g.title AS goal,g.dimension FROM progress_observations o JOIN progress_goals g ON g.id=o.goal_id

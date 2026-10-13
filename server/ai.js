@@ -30,7 +30,7 @@ async function contextForModel(config, context, fetchImpl) {
   for (let index = 0; index < all.length; index += 50) {
     const group = all.slice(index, index + 50);
     const summary = await sendModel(config, {
-      system: '请压缩家庭记录。只保留可观察事实、日期与原始记录编号，不做评价，不添加没有出现的事实。',
+      system: '请压缩家庭记录。保留可观察事实、日期、发生时间与原始记录编号，不做评价，不添加没有出现的事实。',
       messages: [{ role: 'user', content: JSON.stringify(group) }], maxTokens: 1400
     }, fetchImpl);
     chunks.push({ sourceIds: group.map(x => x.id), summary });

@@ -9,6 +9,8 @@ const STATUS = { trying: '开始尝试', practicing: '持续练习', independent
 const EMPTY_PROFILE = { name: '', birthday: '', interests: '', focus: '', baseline: '', notes: '' };
 const EMPTY_ACTIVITY = { categoryId: '', projectId: '', title: '', note: '', durationMinutes: '', mood: '', localDate: dayString(), details: {} };
 const icons = { english: '▣', sports: '↗', music: '♫', thinking: '◈', social: '♡', life: '☼' };
+const clockValue = value => value ? new Date(value).toTimeString().slice(0, 5) : new Date().toTimeString().slice(0, 5);
+const eventTimestamp = (date, time) => new Date(`${date}T${time}:00`).toISOString();
 
 function Modal({ title, onClose, children, wide = false }) {
   useEffect(() => {
@@ -99,23 +101,48 @@ function App() {
 
 function ActivityModal({ categories, projects, initial, onClose, onSave, busy }) {
   const [form, setForm] = useState({ ...initial, details: { ...(initial.details || {}) } });
+  const [eventTime, setEventTime] = useState(clockValue(initial.occurredAt));
   const [more, setMore] = useState(Boolean(initial.id));
   const update = (key, value) => setForm(old => ({ ...old, [key]: value }));
   const detail = (key, value) => setForm(old => ({ ...old, details: { ...old.details, [key]: value } }));
-  return <Modal title={initial.id ? '编辑活动记录' : '记录一次活动'} onClose={onClose}><form onSubmit={event => { event.preventDefault(); onSave({ ...form, occurredAt: initial.occurredAt || new Date(`${form.localDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString() }); }}>
+  return <Modal title={initial.id ? '编辑活动记录' : '记录一次活动'} onClose={onClose}><form onSubmit={event => { event.preventDefault(); onSave({ ...form, occurredAt: eventTimestamp(form.localDate, eventTime) }); }}>
     <div className="form-row"><Field label="活动类型"><select value={form.categoryId} onChange={e => setForm(old => ({ ...old, categoryId: e.target.value, projectId: '' }))} required>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><Field label="项目（可选）"><select value={form.projectId || ''} onChange={e => update('projectId', e.target.value)}><option value="">不指定项目</option>{projects.filter(p => p.categoryId === form.categoryId).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field></div>
+    <div className="form-row"><Field label="发生日期"><input type="date" value={form.localDate} onChange={e => update('localDate', e.target.value)} required /></Field><Field label="发生时间"><input type="time" value={eventTime} onChange={e => setEventTime(e.target.value)} required /></Field></div>
     <Field label="今天做了什么"><textarea rows="3" placeholder="例如：在公园骑了半小时平衡车，转弯比上周更稳了" value={form.note} onChange={e => update('note', e.target.value)} required autoFocus /></Field>
     <button type="button" className="details-toggle" onClick={() => setMore(!more)}>{more ? '收起细节 −' : '添加标题、进度与状态 ＋'}</button>
-    {more && <div className="details-fields"><div className="form-row"><Field label="日期"><input type="date" value={form.localDate} onChange={e => update('localDate', e.target.value)} required /></Field><Field label="简短标题"><input value={form.title} onChange={e => update('title', e.target.value)} placeholder="例如：平衡车" /></Field></div><div className="form-row"><Field label="时长（分钟）"><input type="number" min="0" max="1440" value={form.durationMinutes ?? ''} onChange={e => update('durationMinutes', e.target.value)} /></Field><Field label="当时状态"><select value={form.mood || ''} onChange={e => update('mood', e.target.value)}><option value="">不填写</option>{['开心', '平静', '专注', '兴奋', '疲惫', '烦躁', '难过'].map(x => <option key={x}>{x}</option>)}</select></Field></div>{form.categoryId === 'english' && <><Field label="新词汇 / 句型"><input value={form.details.words || ''} onChange={e => detail('words', e.target.value)} placeholder="例如：balance, I can do it" /></Field><Field label="主动表达"><input value={form.details.expression || ''} onChange={e => detail('expression', e.target.value)} placeholder="例如：主动说了 2 次" /></Field></>}</div>}
+    {more && <div className="details-fields"><Field label="简短标题"><input value={form.title} onChange={e => update('title', e.target.value)} placeholder="例如：平衡车" /></Field><div className="form-row"><Field label="时长（分钟）"><input type="number" min="0" max="1440" value={form.durationMinutes ?? ''} onChange={e => update('durationMinutes', e.target.value)} /></Field><Field label="当时状态"><select value={form.mood || ''} onChange={e => update('mood', e.target.value)}><option value="">不填写</option>{['开心', '平静', '专注', '兴奋', '疲惫', '烦躁', '难过'].map(x => <option key={x}>{x}</option>)}</select></Field></div>{form.categoryId === 'english' && <><Field label="新词汇 / 句型"><input value={form.details.words || ''} onChange={e => detail('words', e.target.value)} placeholder="例如：balance, I can do it" /></Field><Field label="主动表达"><input value={form.details.expression || ''} onChange={e => detail('expression', e.target.value)} placeholder="例如：主动说了 2 次" /></Field></>}</div>}
     <div className="modal-actions"><button type="button" className="button ghost" onClick={onClose}>取消</button><button className="button primary" disabled={busy}>{busy ? '保存中…' : '保存记录'}</button></div>
   </form></Modal>;
 }
 
 function DiaryPanel({ date, diaries, activities, perform, busy }) {
-  const [text, setText] = useState(''); const [mood, setMood] = useState(''); const [links, setLinks] = useState([]); const [editing, setEditing] = useState(null);
-  useEffect(() => { setText(''); setMood(''); setLinks([]); setEditing(null); }, [date]);
-  return <div className="side-card diary-panel"><div className="section-title"><h2>今天想记住的事</h2><span>说的话、感受或有趣的事</span></div><form onSubmit={async e => { e.preventDefault(); const ok = await perform(() => editing ? api(`/diaries/${editing}`, { method: 'PUT', body: { text, mood, localDate: date } }) : api('/diaries', { method: 'POST', body: { text, mood, localDate: date, activityIds: links } }), editing ? '日记已更新' : '日记已保存'); if (ok) { setText(''); setMood(''); setLinks([]); setEditing(null); } }}><textarea className="diary-input" rows="7" value={text} onChange={e => setText(e.target.value)} placeholder={'比如：\n• 今天发生了什么特别的事？\n• 孩子说了什么有意思的话？\n• 他/她当时有什么感受？'} required /><div className="diary-options"><select aria-label="心情" value={mood} onChange={e => setMood(e.target.value)}><option value="">选择心情</option>{['开心', '平静', '兴奋', '疲惫', '烦躁', '难过'].map(x => <option key={x}>{x}</option>)}</select>{!editing && activities.length > 0 && <select aria-label="关联活动" value="" onChange={e => setLinks(old => [...new Set([...old, e.target.value])])}><option value="">关联今天的活动</option>{activities.filter(a => !links.includes(a.id)).map(a => <option value={a.id} key={a.id}>{a.categoryName} · {a.title || a.note.slice(0, 12)}</option>)}</select>}</div>{links.length > 0 && <small className="muted">已关联 {links.length} 条活动</small>}<div className="diary-save"><span>{text.length} 字</span><button className="button primary" disabled={busy || !text.trim()}>{editing ? '更新日记' : '保存日记'}</button></div></form>
-    {diaries.length > 0 && <div className="diary-list"><h3>这一天的日记</h3>{diaries.map(d => <article key={d.id} className="diary-entry"><div className="diary-entry-head"><small>{timeLabel(d.createdAt)} {d.mood && `· ${d.mood}`}</small><div><button onClick={() => { setEditing(d.id); setText(d.text); setMood(d.mood); }}>编辑</button><button onClick={async () => { if (window.confirm('删除这篇日记？')) await perform(() => api(`/diaries/${d.id}`, { method: 'DELETE' }), '日记已删除'); }}>删除</button></div></div><p>{d.text}</p></article>)}</div>}
+  const [text, setText] = useState('');
+  const [mood, setMood] = useState('');
+  const [eventTime, setEventTime] = useState(clockValue());
+  const [links, setLinks] = useState([]);
+  const [editing, setEditing] = useState(null);
+  useEffect(() => { setText(''); setMood(''); setEventTime(clockValue()); setLinks([]); setEditing(null); }, [date]);
+  const save = async e => {
+    e.preventDefault();
+    const body = { text, mood, localDate: date, occurredAt: eventTimestamp(date, eventTime) };
+    const ok = await perform(() => editing
+      ? api(`/diaries/${editing}`, { method: 'PUT', body })
+      : api('/diaries', { method: 'POST', body: { ...body, activityIds: links } }), editing ? '日记已更新' : '日记已保存');
+    if (ok) { setText(''); setMood(''); setEventTime(clockValue()); setLinks([]); setEditing(null); }
+  };
+  return <div className="side-card diary-panel">
+    <div className="section-title"><h2>今天想记住的事</h2><span>说的话、感受或有趣的事</span></div>
+    <form onSubmit={save}>
+      <textarea className="diary-input" rows="7" value={text} onChange={e => setText(e.target.value)} placeholder={'比如：\n• 今天发生了什么特别的事？\n• 孩子说了什么有意思的话？\n• 他/她当时有什么感受？'} required />
+      <div className="diary-options">
+        <Field label="发生时间"><input type="time" value={eventTime} onChange={e => setEventTime(e.target.value)} required /></Field>
+        <Field label="心情"><select value={mood} onChange={e => setMood(e.target.value)}><option value="">选择心情</option>{['开心', '平静', '兴奋', '疲惫', '烦躁', '难过'].map(x => <option key={x}>{x}</option>)}</select></Field>
+        {!editing && activities.length > 0 && <Field label="关联活动"><select value="" onChange={e => setLinks(old => [...new Set([...old, e.target.value])])}><option value="">关联今天的活动</option>{activities.filter(a => !links.includes(a.id)).map(a => <option value={a.id} key={a.id}>{a.categoryName} · {a.title || a.note.slice(0, 12)}</option>)}</select></Field>}
+      </div>
+      {links.length > 0 && <small className="muted">已关联 {links.length} 条活动</small>}
+      <div className="diary-save"><span>{text.length} 字</span><button className="button primary" disabled={busy || !text.trim()}>{editing ? '更新日记' : '保存日记'}</button></div>
+    </form>
+    {diaries.length > 0 && <div className="diary-list"><h3>这一天的日记</h3>{diaries.map(d => <article key={d.id} className="diary-entry"><div className="diary-entry-head"><small>发生于 {timeLabel(d.occurredAt || d.createdAt)} {d.mood && `· ${d.mood}`}</small><div><button onClick={() => { setEditing(d.id); setText(d.text); setMood(d.mood); setEventTime(clockValue(d.occurredAt || d.createdAt)); }}>编辑</button><button onClick={async () => { if (window.confirm('删除这篇日记？')) await perform(() => api(`/diaries/${d.id}`, { method: 'DELETE' }), '日记已删除'); }}>删除</button></div></div><p>{d.text}</p></article>)}</div>}
   </div>;
 }
 
@@ -173,7 +200,7 @@ function ObservationModal({ goal, activities, onClose, onSave }) {
 
 function SourceLinks({ ids, onSource }) { return ids?.length > 0 && <div className="source-list"><span>关联记录</span>{ids.map((id, index) => <button key={id} onClick={() => onSource(id)}>记录 {index + 1} ↗</button>)}</div>; }
 function useSource(open) { return id => { api(`/sources/${id}`).then(open).catch(err => alert(err.message)); }; }
-function SourceModal({ source, onClose }) { return source && <Modal title="原始记录" onClose={onClose}><div className="source-detail"><span className="eyebrow">{source.type} · {source.localDate || source.observedAt}</span><h3>{source.title || source.categoryName || source.dimension || '日记片段'}</h3><p>{source.note || source.text || '暂无文字'}</p></div></Modal>; }
+function SourceModal({ source, onClose }) { return source && <Modal title="原始记录" onClose={onClose}><div className="source-detail"><span className="eyebrow">{source.type} · {source.localDate || source.observedAt}{source.occurredAt && ` ${timeLabel(source.occurredAt)}`}</span><h3>{source.title || source.categoryName || source.dimension || '日记片段'}</h3><p>{source.note || source.text || '暂无文字'}</p></div></Modal>; }
 
 function EvaluationPage({ profile, onError }) {
   const [from, setFrom] = useState(daysAgo(29)); const [to, setTo] = useState(dayString()); const [reports, setReports] = useState([]); const [busy, setBusy] = useState(false); const [source, setSource] = useState(null);

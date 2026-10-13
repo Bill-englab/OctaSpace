@@ -51,7 +51,7 @@ export function openStore(dataDir) {
     CREATE INDEX IF NOT EXISTS activities_date_idx ON activities(local_date, occurred_at);
     CREATE TABLE IF NOT EXISTS diary_entries (
       id TEXT PRIMARY KEY, local_date TEXT NOT NULL, text TEXT NOT NULL, mood TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      occurred_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS diary_activity_links (
       diary_id TEXT NOT NULL REFERENCES diary_entries(id) ON DELETE CASCADE,
@@ -94,6 +94,10 @@ export function openStore(dataDir) {
   if (!db.prepare('PRAGMA table_info(activities)').all().some(column => column.name === 'project_id')) {
     db.exec('ALTER TABLE activities ADD COLUMN project_id TEXT REFERENCES projects(id)');
   }
+  if (!db.prepare('PRAGMA table_info(diary_entries)').all().some(column => column.name === 'occurred_at')) {
+    db.exec("ALTER TABLE diary_entries ADD COLUMN occurred_at TEXT NOT NULL DEFAULT ''");
+  }
+  db.exec("UPDATE diary_entries SET occurred_at=created_at WHERE occurred_at=''");
   const insertCategory = db.prepare('INSERT OR IGNORE INTO categories(id,name,dimension,color,sort_order) VALUES (?,?,?,?,?)');
   DEFAULT_CATEGORIES.forEach((row, index) => insertCategory.run(...row, index));
   seedDefaultProjects(db);

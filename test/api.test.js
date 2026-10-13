@@ -40,9 +40,11 @@ test('activity, diary and progress can be created and read through the API', () 
   assert.equal(source.data.note, '独立绕过障碍');
   const timeline = await request('/api/activities?from=2026-10-12&to=2026-10-12');
   assert.equal(timeline.data.length, 1);
-  const diary = await request('/api/diaries', 'POST', { localDate: '2026-10-12', text: '今天很开心。', activityIds: [activity.data.id] });
+  const diary = await request('/api/diaries', 'POST', { localDate: '2026-10-12', occurredAt: '2026-10-12T16:25:00+08:00', text: '今天很开心。', activityIds: [activity.data.id] });
   assert.equal(diary.status, 201);
+  assert.equal(diary.data.occurredAt, '2026-10-12T16:25:00+08:00');
   assert.deepEqual((await request('/api/diaries?from=2026-10-12&to=2026-10-12')).data[0].activityIds, [activity.data.id]);
+  assert.equal((await request(`/api/sources/${diary.data.id}`)).data.occurredAt, diary.data.occurredAt);
   const goal = await request('/api/goals', 'POST', { title: '平衡车绕障碍', dimension: '大动作', categoryId: 'sports' });
   const observation = await request('/api/observations', 'POST', { goalId: goal.data.id, status: 'independent', observedAt: '2026-10-12', activityId: activity.data.id });
   assert.equal(observation.status, 201);

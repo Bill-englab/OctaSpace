@@ -6,7 +6,7 @@ import path from 'node:path';
 import { openStore } from '../server/db.js';
 import {
   listCategories, saveCategory, listProjects, saveProject, saveActivity, updateActivity, deleteActivity, listTimeline,
-  saveDiary, listDiaries, saveGoal, listGoals, saveObservation
+  saveDiary, updateDiary, listDiaries, saveGoal, listGoals, saveObservation
 } from '../server/records.js';
 
 async function withStore(run) {
@@ -55,6 +55,16 @@ test('multiple diary entries can link to activities on the same date', () => wit
   const entries = listDiaries(db, { from: '2026-10-12', to: '2026-10-12' });
   assert.equal(entries.length, 2);
   assert.deepEqual(entries.find(x => x.id === diary.id).activityIds, [activity.id]);
+}));
+
+test('diary event time survives creation, editing, and date-range listing', () => withStore(db => {
+  const entry = saveDiary(db, { localDate: '2026-10-12', occurredAt: '2026-10-12T08:35:00+08:00', text: '早上主动聊天' });
+  assert.equal(entry.occurredAt, '2026-10-12T08:35:00+08:00');
+  const later = saveDiary(db, { localDate: '2026-10-12', occurredAt: '2026-10-12T18:10:00+08:00', text: '晚饭时分享学校的事' });
+  assert.deepEqual(listDiaries(db, { from: '2026-10-12', to: '2026-10-12' }).map(x => x.id), [later.id, entry.id]);
+  const edited = updateDiary(db, entry.id, { occurredAt: '2026-10-12T19:20:00+08:00' });
+  assert.equal(edited.occurredAt, '2026-10-12T19:20:00+08:00');
+  assert.deepEqual(listDiaries(db, { from: '2026-10-12', to: '2026-10-12' }).map(x => x.id), [entry.id, later.id]);
 }));
 
 test('goal observations preserve progress history and reject unknown statuses', () => withStore(db => {

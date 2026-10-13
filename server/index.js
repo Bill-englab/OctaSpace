@@ -66,7 +66,7 @@ export function createApp({ dataDir = path.join(projectDir, 'data'), fetchImpl =
       if (sourceId && req.method === 'GET') {
         const activity = getActivity(store.db, sourceId);
         if (activity) return sendJson(res, 200, { type: '活动', ...activity });
-        const diary = store.db.prepare('SELECT id,local_date AS localDate,text,mood FROM diary_entries WHERE id=?').get(sourceId);
+        const diary = store.db.prepare("SELECT id,local_date AS localDate,COALESCE(NULLIF(occurred_at,''),created_at) AS occurredAt,text,mood FROM diary_entries WHERE id=?").get(sourceId);
         if (diary) return sendJson(res, 200, { type: '日记', ...diary });
         const progress = store.db.prepare(`SELECT o.id,o.observed_at AS observedAt,o.note,o.status,g.title,g.dimension FROM progress_observations o JOIN progress_goals g ON g.id=o.goal_id WHERE o.id=?`).get(sourceId);
         if (progress) return sendJson(res, 200, { type: '进度观察', ...progress });

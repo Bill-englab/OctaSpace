@@ -54,6 +54,9 @@
 .quick-grid { gap: 12px; }
 .quick-grid button { min-height: 64px; }
 .diary-options select { min-height: 38px; }
+.diary-options { align-items: end; gap: 10px; }
+.diary-options .field { flex: 1 1 130px; min-width: 0; margin: 0; }
+.diary-options .field:last-child { flex-grow: 1.5; }
 
 .category-grid { gap: var(--layout-gap); }
 .category-card {

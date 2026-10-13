@@ -35,12 +35,16 @@ test('a version 1 backup remains importable after adding projects', () => {
   const secondDir = fs.mkdtempSync(path.join(os.tmpdir(), 'journal-old-backup-b-'));
   const first = openStore(firstDir); const second = openStore(secondDir);
   try {
+    first.db.prepare('INSERT INTO diary_entries(id,local_date,text,created_at,updated_at) VALUES (?,?,?,?,?)')
+      .run('legacy-diary', '2026-10-12', '旧备份里的互动', '2026-10-12T09:15:00Z', '2026-10-12T09:15:00Z');
     const old = exportBackup(first.db, first.mediaDir);
     old.version = 1;
     delete old.tables.projects;
     old.tables.activities.forEach(row => delete row.project_id);
+    old.tables.diary_entries.forEach(row => delete row.occurred_at);
     importBackup(second.db, second.mediaDir, old);
     assert.equal(second.db.prepare("SELECT count(*) AS n FROM projects WHERE category_id='english'").get().n, 2);
+    assert.equal(second.db.prepare("SELECT COALESCE(NULLIF(occurred_at,''),created_at) AS event_time FROM diary_entries WHERE id='legacy-diary'").get().event_time, '2026-10-12T09:15:00Z');
   } finally { first.close(); second.close(); fs.rmSync(firstDir, { recursive: true, force: true }); fs.rmSync(secondDir, { recursive: true, force: true }); }
 });
 

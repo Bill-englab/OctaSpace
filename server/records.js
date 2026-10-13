@@ -132,21 +132,22 @@ export function saveDiary(db, input) {
   const mood = String(input.mood ?? '').trim().slice(0, 80);
   const activityIds = [...new Set(Array.isArray(input.activityIds) ? input.activityIds : [])];
   const now = new Date().toISOString();
+  const occurredAt = timestamp(input.occurredAt ?? now);
   db.exec('BEGIN');
   try {
-    db.prepare('INSERT INTO diary_entries(id,local_date,text,mood,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(id, date, text, mood, now, now);
+    db.prepare('INSERT INTO diary_entries(id,local_date,text,mood,occurred_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(id, date, text, mood, occurredAt, now, now);
     const link = db.prepare('INSERT INTO diary_activity_links(diary_id,activity_id) VALUES (?,?)');
     for (const activityId of activityIds) link.run(id, activityId);
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }
-  return { id, localDate: date, text, mood, activityIds, createdAt: now, updatedAt: now };
+  return { id, localDate: date, text, mood, activityIds, occurredAt, createdAt: now, updatedAt: now };
 }
 
 export function listDiaries(db, { from, to } = {}) {
-  const rows = db.prepare('SELECT * FROM diary_entries WHERE local_date BETWEEN ? AND ? ORDER BY local_date DESC,created_at DESC').all(localDate(from), localDate(to));
+  const rows = db.prepare("SELECT * FROM diary_entries WHERE local_date BETWEEN ? AND ? ORDER BY local_date DESC,COALESCE(NULLIF(occurred_at,''),created_at) DESC,created_at DESC").all(localDate(from), localDate(to));
   const links = db.prepare('SELECT activity_id FROM diary_activity_links WHERE diary_id=?');
   return rows.map(row => ({
-    id: row.id, localDate: row.local_date, text: row.text, mood: row.mood,
+    id: row.id, localDate: row.local_date, text: row.text, mood: row.mood, occurredAt: row.occurred_at || row.created_at,
     activityIds: links.all(row.id).map(x => x.activity_id), createdAt: row.created_at, updatedAt: row.updated_at
   }));
 }
@@ -157,7 +158,8 @@ export function updateDiary(db, id, input) {
   const date = localDate(input.localDate ?? old.local_date);
   const text = requiredText(input.text ?? old.text, '日记内容', 12000);
   const mood = String(input.mood ?? old.mood).trim().slice(0, 80);
-  db.prepare('UPDATE diary_entries SET local_date=?,text=?,mood=?,updated_at=? WHERE id=?').run(date, text, mood, new Date().toISOString(), id);
+  const occurredAt = timestamp(input.occurredAt ?? (old.occurred_at || old.created_at));
+  db.prepare('UPDATE diary_entries SET local_date=?,text=?,mood=?,occurred_at=?,updated_at=? WHERE id=?').run(date, text, mood, occurredAt, new Date().toISOString(), id);
   return listDiaries(db, { from: date, to: date }).find(x => x.id === id);
 }
 
