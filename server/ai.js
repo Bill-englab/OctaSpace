@@ -34,7 +34,7 @@ async function contextForModel(config, context, fetchImpl) {
     const group = all.slice(index, index + 50);
     const summary = await sendModel(config, {
       system: '请压缩家庭记录。保留可观察事实、日期、发生时间与原始记录编号，不做评价，不添加没有出现的事实。',
-      messages: [{ role: 'user', content: JSON.stringify(group) }], maxTokens: 1400
+      messages: [{ role: 'user', content: JSON.stringify(group) }], maxTokens: 16384, timeoutMs: 480000
     }, fetchImpl);
     chunks.push({ sourceIds: group.map(x => x.id), summary });
   }
@@ -80,7 +80,7 @@ export async function askChildQuestion(db, config, input, fetchImpl = fetch) {
     const recordContext = await contextForModel(config, context, fetchImpl);
     const raw = await sendModel(config, {
       system: `${sourceInstruction()}\n孩子资料及所选范围记录：${recordContext}`,
-      messages: [...history, { role: 'user', content: question }], maxTokens: 2300
+      messages: [...history, { role: 'user', content: question }], maxTokens: 16384, timeoutMs: 480000
     }, fetchImpl);
     const { content, sources } = cleanOutput(raw, context.sourceIds);
     const replyId = crypto.randomUUID();

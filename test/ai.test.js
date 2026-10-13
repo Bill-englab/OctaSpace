@@ -42,6 +42,61 @@ test('chat uses selected records and links only real source IDs', () => setup(as
   assert.deepEqual(listChatMessages(db, reply.sessionId).map(x => x.role), ['user', 'assistant']);
 }));
 
+test('chat waits for a reasoning MaaS response that takes longer than one minute', () => setup(async db => {
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = ms => {
+    const controller = new AbortController();
+    if (ms <= 60000) setTimeout(() => controller.abort(new DOMException('virtual minute elapsed', 'TimeoutError')), 5);
+    return controller.signal;
+  };
+  try {
+    const fetchImpl = async (_url, options) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ answer: '可询问同伴互动。', sourceIds: [] }) } }] }), { status: 200 })), 15);
+      options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal.reason); }, { once: true });
+    });
+    const reply = await askChildQuestion(db, config, { question: '家长会该问什么？', today: '2026-10-13' }, fetchImpl);
+    assert.equal(reply.content, '可询问同伴互动。');
+    assert.equal(listChatMessages(db, reply.sessionId).at(-1).role, 'assistant');
+  } finally { AbortSignal.timeout = originalTimeout; }
+}));
+
+test('chat leaves enough output tokens for a reasoning model to produce a visible answer', () => setup(async db => {
+  const fetchImpl = async (_url, options) => {
+    const { max_tokens: budget } = JSON.parse(options.body);
+    const choice = budget < 8000
+      ? { finish_reason: 'length', message: { content: '' } }
+      : { finish_reason: 'stop', message: { content: JSON.stringify({ answer: '先询问孩子在园里的兴趣。', sourceIds: [] }) } };
+    return new Response(JSON.stringify({ choices: [choice] }), { status: 200 });
+  };
+  const reply = await askChildQuestion(db, config, { question: '家长会该问什么？', today: '2026-10-13' }, fetchImpl);
+  assert.equal(reply.content, '先询问孩子在园里的兴趣。');
+}));
+
+test('chat can compress more than sixty records with a slow reasoning MaaS', () => setup(async db => {
+  for (let index = 0; index < 61; index++) {
+    saveActivity(db, { categoryId: 'english', occurredAt: `2026-10-12T11:${String(index % 60).padStart(2, '0')}:00+08:00`, localDate: '2026-10-12', note: `活动${index}` });
+  }
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = ms => {
+    const controller = new AbortController();
+    if (ms <= 60000) setTimeout(() => controller.abort(new DOMException('virtual minute elapsed', 'TimeoutError')), 5);
+    return controller.signal;
+  };
+  try {
+    const fetchImpl = async (_url, options) => new Promise((resolve, reject) => {
+      const body = JSON.parse(options.body);
+      const isSummary = body.messages[0].content.startsWith('请压缩家庭记录');
+      const choice = isSummary && body.max_tokens < 8000
+        ? { finish_reason: 'length', message: { content: '' } }
+        : { finish_reason: 'stop', message: { content: isSummary ? '保留日期和事实的摘要' : JSON.stringify({ answer: '可以观察主动表达。', sourceIds: [] }) } };
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({ choices: [choice] }), { status: 200 })), 15);
+      options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(options.signal.reason); }, { once: true });
+    });
+    const reply = await askChildQuestion(db, config, { question: '有哪些变化？', today: '2026-10-13' }, fetchImpl);
+    assert.equal(reply.content, '可以观察主动表达。');
+  } finally { AbortSignal.timeout = originalTimeout; }
+}));
+
 test('evaluation is saved as a stable on-demand report with range and sources', () => setup(async db => {
   const activity = saveActivity(db, { categoryId: 'english', occurredAt: '2026-10-12T11:00:00+08:00', localDate: '2026-10-12', note: '主动说完整句子' });
   db.prepare('UPDATE child_profile SET birthday=?,focus=? WHERE id=1').run('2022-09-25', '主动表达');
