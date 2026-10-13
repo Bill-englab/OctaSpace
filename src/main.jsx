@@ -3,5 +3,6 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './styles.css';
 import './alignment.css';
+import './evaluation.css';
 
 createRoot(document.getElementById('root')).render(<App />);

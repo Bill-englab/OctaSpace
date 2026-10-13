@@ -59,13 +59,21 @@ test('MaaS config, independent chat and on-demand evaluation are exposed through
   let modelCalls = 0;
   const fetchImpl = async () => {
     modelCalls++;
-    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ answer: '基于记录，正在尝试新活动。', sourceIds: [] }) } }] }), { status: 200 });
+    const output = modelCalls === 1 ? { answer: '基于记录，正在尝试新活动。', sourceIds: [] } : {
+      summary: { judgement: '运动体验丰富', priority: '保持有趣的运动' },
+      familyPlan: { strengths: '有运动机会', adjustment: '关注孩子的意愿' },
+      dimensions: ['de', 'zhi', 'ti', 'mei', 'lao'].map(id => ({ id, status: 'unknown', verdict: '继续了解', ageContext: '四岁阶段的自然观察', known: '现有资料有限', gap: '尚无法判断', question: '孩子喜欢什么？' })),
+      gaps: [], actions: [{ title: '玩球', why: '贴近兴趣', activity: '一起滚球', guidance: '轮流玩', signal: '愿意反复尝试', alternative: '换成孩子喜欢的活动' }],
+      followUpQuestions: ['下次孩子想玩什么？'], limits: '资料有限'
+    };
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }), { status: 200 });
   };
   return withApi(async ({ request }) => {
     const config = await request('/api/maas-config', 'PUT', { format: 'openai', baseUrl: 'https://maas.example/v1', model: 'demo', apiKey: 'secret' });
     assert.equal(config.status, 200);
     assert.equal(config.data.hasKey, true);
     assert.equal(JSON.stringify((await request('/api/maas-config')).data).includes('secret'), false);
+    await request('/api/profile', 'PUT', { birthday: '2022-09-25', focus: '身体素质' });
     await request('/api/activities', 'POST', { categoryId: 'sports', occurredAt: '2026-10-12T16:20:00+08:00', localDate: '2026-10-12', note: '骑车' });
     const chat = await request('/api/chat', 'POST', { question: '今天怎么样？', today: '2026-10-12' });
     assert.equal(chat.status, 200);

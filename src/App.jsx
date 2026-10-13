@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, dayString, daysAgo, dateLabel, timeLabel } from './api.js';
+import EvaluationReport from './EvaluationReport.jsx';
 
 const NAV = [
   ['today', '⌂', '今天'], ['categories', '▦', '活动分类'], ['growth', '▥', '成长进度'],
@@ -202,12 +203,21 @@ function SourceLinks({ ids, onSource }) { return ids?.length > 0 && <div classNa
 function useSource(open) { return id => { api(`/sources/${id}`).then(open).catch(err => alert(err.message)); }; }
 function SourceModal({ source, onClose }) { return source && <Modal title="原始记录" onClose={onClose}><div className="source-detail"><span className="eyebrow">{source.type} · {source.localDate || source.observedAt}{source.occurredAt && ` ${timeLabel(source.occurredAt)}`}</span><h3>{source.title || source.categoryName || source.dimension || '日记片段'}</h3><p>{source.note || source.text || '暂无文字'}</p></div></Modal>; }
 
+function ageAtDate(birthday, date) {
+  if (!birthday || !date) return '';
+  const born = new Date(`${birthday}T00:00:00Z`); const at = new Date(`${date}T00:00:00Z`);
+  if (!Number.isFinite(born.getTime()) || !Number.isFinite(at.getTime())) return '';
+  let months = (at.getUTCFullYear() - born.getUTCFullYear()) * 12 + at.getUTCMonth() - born.getUTCMonth();
+  if (at.getUTCDate() < born.getUTCDate()) months--;
+  return months >= 0 ? `${Math.floor(months / 12)}岁${months % 12}个月` : '';
+}
+
 function EvaluationPage({ profile, onError }) {
   const [from, setFrom] = useState(daysAgo(29)); const [to, setTo] = useState(dayString()); const [reports, setReports] = useState([]); const [busy, setBusy] = useState(false); const [source, setSource] = useState(null);
   const openSource = useSource(setSource);
   useEffect(() => { api('/evaluations').then(setReports).catch(err => onError(err.message)); }, []);
   const generate = async () => { setBusy(true); onError(''); try { const report = await api('/evaluations', { method: 'POST', body: { from, to } }); setReports(old => [report, ...old]); } catch (err) { onError(err.message); } finally { setBusy(false); } };
-  return <><PageHeading kicker="ON DEMAND" title="AI 成长评估" subtitle="你选择时间范围并主动生成，报告会结合孩子资料、当前记录与前一段时间的变化。" />{!profile.birthday && <div className="notice">建议先在设置中填写孩子生日与基础情况，评估会更贴近实际。</div>}<section className="panel evaluation-control"><div className="section-title"><h2>选择观察时段</h2><span>历史对比自动采用前一个等长时段</span></div><div className="range-bar"><Field label="开始日期"><input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} /></Field><Field label="结束日期"><input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} /></Field><button className="button primary" onClick={generate} disabled={busy}>{busy ? '正在生成，可能需要几分钟…' : '✧ 生成多维评估'}</button></div><p className="muted">报告会呈现观察、变化、资料不足之处，以及接下来 2–4 周可以尝试的活动。推理模型可能需要几分钟，请保持页面打开。</p></section><div className="section-title reports-heading"><h2>已生成的评估</h2><span>{reports.length} 份</span></div>{reports.length ? reports.map(r => <article className="panel report-card" key={r.id}><div className="report-head"><div><span className="eyebrow">{r.fromDate} — {r.toDate}</span><h2>成长观察报告</h2></div><small>{new Date(r.createdAt).toLocaleString('zh-CN')} · {r.model}</small></div><div className="report-text">{r.content}</div><SourceLinks ids={r.sources} onSource={openSource} /><div className="coverage">资料覆盖：当前时段 {r.coverage?.recordCount ?? 0} 条记录，{r.coverage?.recordedDays ?? 0} 天有记录；对照时段 {r.coverage?.comparisonRecordCount ?? 0} 条记录</div></article>) : <div className="empty-card"><span>✧</span><h3>还没有评估报告</h3><p>先记录几天，再选定时间范围生成一份。</p></div>}<SourceModal source={source} onClose={() => setSource(null)} /></>;
+  return <><PageHeading kicker="ON DEMAND" title="AI 成长评估" subtitle="结合孩子的年龄、家庭目标、已有基础与随手记录，看看当前的培养方向和下一步。" />{!profile.birthday && <div className="notice">请先在设置中填写孩子生日，才能结合年龄评估。</div>}<section className="panel evaluation-control"><div className="section-title"><h2>选择观察时段</h2><span>评估年龄：{ageAtDate(profile.birthday, to) || '请填写生日'}</span></div><div className="range-bar"><Field label="开始日期"><input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)} /></Field><Field label="结束日期"><input type="date" value={to} min={from} onChange={e => setTo(e.target.value)} /></Field><button className="button primary" onClick={generate} disabled={busy || !profile.birthday}>{busy ? '正在生成，可能需要几分钟…' : '✧ 生成多维评估'}</button></div><p className="muted">记录可随手写，评估也会参考长期基础与家庭目标。生成可能需要几分钟，请保持页面打开。</p></section><div className="section-title reports-heading"><h2>已生成的评估</h2><span>{reports.length} 份</span></div>{reports.length ? reports.map(r => <article className="panel report-card" key={r.id}><div className="report-head"><div><span className="eyebrow">{r.fromDate} — {r.toDate}</span><h2>{r.report ? '成长与培养评估' : '成长观察报告'}</h2></div><small>{new Date(r.createdAt).toLocaleString('zh-CN')} · {r.model}</small></div><EvaluationReport evaluation={r} onSource={openSource} />{!r.report && <SourceLinks ids={r.sources} onSource={openSource} />}</article>) : <div className="empty-card"><span>✧</span><h3>还没有评估报告</h3><p>先填写孩子资料与家庭目标，再选择时段生成一份。</p></div>}<SourceModal source={source} onClose={() => setSource(null)} /></>;
 }
 
 function ChatPage({ onError }) {
