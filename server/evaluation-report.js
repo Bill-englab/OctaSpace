@@ -35,9 +35,10 @@ export function evaluationPrompt(context, ageReference, recordContext) {
   };
   return `你是面向家长的学龄前儿童成长与家庭培养顾问。请判断孩子当前已知表现、家庭培养目标的适龄性与差距，并给出未来2–4周可执行的指导。
 先使用准确月龄。年龄参照中的 current 是当前可观察方向；next 是后续阶段末期方向，绝不能写成现在必须达标。仅用提供的参照，不编造英语水平、RAZ级别、识字量或运动项目的年龄常模。德智体美劳是组织内容的五个角度，不是标准化分数。
-把权威年龄参照、家长填写的基线与目标、具体记录明确分开。未记录不等于没做；日常记录是随手记，不评价记录频率、完整度或家长勤奋程度。接触、模仿、跟读、理解、掌握和自发使用不可混同。没有对照证据不得编造进步或退步。依据不足时说“尚无法判断”，给一个容易回答的问题。目标含糊时不能编造量化标准。
-总体判断要直接而温和，说明家庭培养计划的优势和最值得调整的一点。每个维度说明年龄参照、已有表现、与家庭目标的关系、判断确定程度及一个待了解问题。只列真正有依据的差距。给1至3项有优先级的行动，每项要说为什么、怎么玩、家长怎么引导、观察什么信号、不感兴趣时怎么改。优先利用兴趣、游戏与日常生活；不要为了填满五维而增加课程或打卡。
-不要作医学诊断，不给发育分数或整体“优秀/落后”标签。若资料明确显示技能倒退或家长有发展担忧，建议咨询专业人员。语言应具体、温暖、有指导性；避免流水账和重复抄录。
+把权威年龄参照、家长填写的基线与目标、具体记录明确分开。未记录不等于没做；日常记录是随手记，不评价记录频率、完整度或家长勤奋程度。尤其禁止因为某领域近期没有记录，就判断该领域培养缺失、投入不足，或把补齐该领域列为建议。记录空白只可在该维度的已知表现和判断边界里说明“尚不了解”，然后提一个问题；不要写进总体判断、家庭计划调整、差距列表或行动理由。
+长期基线里的游泳、音乐等不能说成本期有进展；近期记录中的一次尝试不能说成长期稳定能力。接触、模仿、跟读、理解、掌握和自发使用不可混同。例如仅有跟读记录时，应该说“尚不了解自发使用情况”，不可说“英语还停留在跟读”。家长认为力量弱只是一项家长观察，不是测量证实的能力差距。没有对照证据不得编造进步或退步。依据不足时说“尚无法判断”，给一个容易回答的问题。目标含糊时不能编造量化标准。
+总体判断要直接而温和，尽量控制在两句话，说明家庭培养计划的优势和最值得调整的一点。每个维度说明年龄参照、已有表现、与家庭目标的关系、判断确定程度及一个待了解问题。只列真正有依据的差距；如果只有观察空白，gaps返回空数组。年龄参照字段用面向家长的自然语言，不写de-play之类内部编号；编号只放referenceIds。给1至3项有优先级的行动，每项要说为什么、怎么玩、家长怎么引导、观察什么信号、不感兴趣时怎么改。优先利用兴趣、游戏与日常生活；不要为了填满五维而增加课程、打卡或固定每日训练时长。
+不要作医学诊断，不给发育分数或整体“优秀/落后”标签。涉及攀爬、悬吊等体能游戏时提醒成人看护，避免限时竞赛或过度负荷。若资料明确显示技能倒退或家长有发展担忧，建议咨询专业人员。语言应具体、温暖、有指导性；避免流水账和重复抄录。
 只能返回一个合法JSON对象，不要Markdown代码块。必须严格匹配以下字段与五个dimension id；status只能选一个值。每项重要判断尽量填写支持它的recordIds、profileFields与referenceIds，未知维度可没有记录引用。actions至少1项最多3项，followUpQuestions最多3项：${JSON.stringify(schema)}
 年龄参照（版本${ageReference.version}，${ageReference.ageLabel}；每项有id、阶段和来源）：${JSON.stringify(ageReference.items)}
 孩子资料、家庭目标与观察：${recordContext}`;
@@ -88,6 +89,11 @@ export function parseEvaluation(raw, { sourceIds, ageReference }) {
     dimensions: DIMENSIONS.map(id => dimensions.find(item => item.id === id)), gaps, actions, followUpQuestions,
     limits: field(input.limits, '判断边界')
   };
+  const decisionText = [report.summary.judgement, report.summary.priority, report.familyPlan.strengths, report.familyPlan.adjustment,
+    ...report.gaps.flatMap(item => [item.title, item.explanation]), ...report.actions.flatMap(item => [item.title, item.why])].join('\n');
+  if (/(?:没有|无|零|缺少|缺乏|未见|未出现|空白).{0,12}(?:记录|观察证据)|(?:记录|观察证据).{0,12}(?:没有|缺少|缺乏|未见|未出现|空白|为零)/.test(decisionText)) {
+    throw new ProviderError('MaaS 把未记录当作培养差距，请重试');
+  }
   const sources = [...new Set([...report.familyPlan.recordIds, ...report.dimensions.flatMap(item => item.recordIds), ...gaps.flatMap(item => item.recordIds), ...actions.flatMap(item => item.recordIds)])];
   return { report, sources };
 }

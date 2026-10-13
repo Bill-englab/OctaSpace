@@ -63,6 +63,7 @@ test('evaluation is saved as a stable on-demand report with range and sources', 
   assert.match(sent.messages[0].content, /未记录不等于没做/);
   assert.match(sent.messages[0].content, /家庭目标/);
   assert.match(sent.messages[0].content, /四岁阶段/);
+  assert.match(sent.messages[0].content, /攀爬、悬吊.*成人看护/);
 }));
 
 test('failed MaaS call keeps the user question but saves no report', () => setup(async db => {
@@ -90,7 +91,7 @@ test('evaluation allows a longer response and enough output for a reasoning mode
     };
     await generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-30' }, fetchImpl);
     assert.ok(requestedTimeout >= 180000);
-    assert.ok(requestedTokens >= 6000);
+    assert.ok(requestedTokens >= 20000);
   } finally { AbortSignal.timeout = original; }
 }));
 
@@ -124,4 +125,13 @@ test('older plain-text evaluations remain readable', () => setup(async db => {
   const older = listEvaluations(db)[0];
   assert.equal(older.content, '旧版原文');
   assert.equal(older.report, null);
+}));
+
+test('evaluation rejects missing records used as the reason for a cultivation gap', () => setup(async db => {
+  db.prepare('UPDATE child_profile SET birthday=?,focus=? WHERE id=1').run('2022-09-25', '音乐');
+  const response = structuredReport();
+  response.summary.judgement = '音乐没有记录，说明培养投入不足';
+  const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }] }), { status: 200 });
+  await assert.rejects(generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-13' }, fetchImpl), /未记录|记录缺失/);
+  assert.equal(listEvaluations(db).length, 0);
 }));

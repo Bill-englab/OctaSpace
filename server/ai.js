@@ -116,7 +116,7 @@ export async function generateEvaluation(db, config, input, fetchImpl = fetch) {
   const recordContext = await contextForModel(config, context, fetchImpl);
   const raw = await sendModel(config, {
     system: evaluationPrompt(context, ageReference, recordContext),
-    messages: [{ role: 'user', content: `请评估 ${input.from} 至 ${input.to} 的成长记录。` }], maxTokens: 8192, timeoutMs: 360000
+    messages: [{ role: 'user', content: `请评估 ${input.from} 至 ${input.to} 的成长记录。` }], maxTokens: 24576, timeoutMs: 480000
   }, fetchImpl);
   const { report, sources } = parseEvaluation(raw, { sourceIds: context.sourceIds, ageReference });
   const content = report.summary.judgement;
