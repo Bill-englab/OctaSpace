@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { buildContext, inferRange } from './context.js';
-import { sendModel } from './providers.js';
+import { ProviderError, sendModel } from './providers.js';
 
 function todayLocal() { return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }); }
 function dateBefore(day, days) { return new Date(Date.parse(`${day}T00:00:00Z`) - days * 86400000).toISOString().slice(0, 10); }
@@ -16,6 +16,7 @@ function cleanOutput(raw, allowedIds) {
       claimed = Array.isArray(parsed.sourceIds) ? parsed.sourceIds : [];
     }
   } catch {
+    if (/^[{\[]/.test(trimmed)) throw new ProviderError('MaaS 返回内容不完整，请重试或切换模型');
     claimed = [...raw.matchAll(/\[记录:([\w-]+)\]/g)].map(match => match[1]);
   }
   const allowed = new Set(allowedIds);
@@ -109,7 +110,7 @@ export async function generateEvaluation(db, config, input, fetchImpl = fetch) {
   const recordContext = await contextForModel(config, context, fetchImpl);
   const raw = await sendModel(config, {
     system: `${sourceInstruction()}\n请按当前观察、与前一等长时段的变化、记录不足之处、接下来 2–4 周活动建议、下次回顾观察点组织回答。年龄仅作背景，不给标准化发育评分。\n孩子资料与记录：${recordContext}`,
-    messages: [{ role: 'user', content: `请评估 ${input.from} 至 ${input.to} 的成长记录。` }], maxTokens: 3200
+    messages: [{ role: 'user', content: `请评估 ${input.from} 至 ${input.to} 的成长记录。` }], maxTokens: 8192, timeoutMs: 360000
   }, fetchImpl);
   const { content, sources } = cleanOutput(raw, context.sourceIds);
   const id = crypto.randomUUID();

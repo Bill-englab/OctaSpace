@@ -49,3 +49,23 @@ test('provider failures report status without exposing credentials', async () =>
     return true;
   });
 });
+
+test('provider rejects a response cut off by the output limit', async () => {
+  const fetchImpl = async () => new Response(JSON.stringify({ choices: [{
+    finish_reason: 'length', message: { content: '{"answer":"未完成' }
+  }] }), { status: 200 });
+  await assert.rejects(sendModel({ format: 'openai', baseUrl: 'https://maas.example/v1', model: 'demo', apiKey: 'secret' },
+    { system: 'test', messages: [{ role: 'user', content: 'test' }] }, fetchImpl), /截断|输出上限/);
+});
+
+test('provider accepts a longer task-specific timeout', async () => {
+  const original = AbortSignal.timeout;
+  let requestedTimeout;
+  AbortSignal.timeout = ms => { requestedTimeout = ms; return new AbortController().signal; };
+  try {
+    const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: '完成' } }] }), { status: 200 });
+    await sendModel({ format: 'openai', baseUrl: 'https://maas.example/v1', model: 'demo', apiKey: 'secret' },
+      { system: 'test', messages: [{ role: 'user', content: 'test' }], timeoutMs: 300000 }, fetchImpl);
+    assert.equal(requestedTimeout, 300000);
+  } finally { AbortSignal.timeout = original; }
+});

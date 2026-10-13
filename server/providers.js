@@ -18,7 +18,7 @@ export function validateProviderConfig(config) {
   return { ...config, baseUrl: url.toString().replace(/\/$/, ''), model: config.model.trim() };
 }
 
-export async function sendModel(config, { system, messages, maxTokens = 1800 }, fetchImpl = fetch) {
+export async function sendModel(config, { system, messages, maxTokens = 1800, timeoutMs = 60000 }, fetchImpl = fetch) {
   const provider = validateProviderConfig(config);
   const endpoint = provider.format === 'openai' ? `${provider.baseUrl}/chat/completions` : `${provider.baseUrl}/v1/messages`;
   const headers = provider.format === 'openai'
@@ -29,7 +29,7 @@ export async function sendModel(config, { system, messages, maxTokens = 1800 }, 
     : { model: provider.model, system, messages, max_tokens: maxTokens };
   let response;
   try {
-    response = await fetchImpl(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(60000) });
+    response = await fetchImpl(endpoint, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
   } catch (error) {
     throw new ProviderError(error?.name === 'TimeoutError' ? 'MaaS 响应超时' : '无法连接 MaaS 服务', 504);
   }
@@ -41,6 +41,7 @@ export async function sendModel(config, { system, messages, maxTokens = 1800 }, 
   }
   let data;
   try { data = await response.json(); } catch { throw new ProviderError('MaaS 返回内容无法解析'); }
+  if (data?.choices?.[0]?.finish_reason === 'length') throw new ProviderError('MaaS 输出被截断，请重试或切换模型');
   const content = data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.text ?? data?.content;
   const text = typeof content === 'string' ? content : Array.isArray(content)
     ? content.filter(x => x.type === 'text').map(x => x.text).join('') : '';

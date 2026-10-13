@@ -49,3 +49,27 @@ test('failed MaaS call keeps the user question but saves no report', () => setup
   await assert.rejects(generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-30' }, fetchImpl), /频繁/);
   assert.equal(listEvaluations(db).length, 0);
 }));
+
+test('evaluation allows a longer response and enough output for a reasoning model', () => setup(async db => {
+  saveActivity(db, { categoryId: 'english', occurredAt: '2026-10-12T11:00:00+08:00', localDate: '2026-10-12', note: '主动说完整句子' });
+  const original = AbortSignal.timeout;
+  let requestedTimeout;
+  let requestedTokens;
+  AbortSignal.timeout = ms => { requestedTimeout = ms; return new AbortController().signal; };
+  try {
+    const fetchImpl = async (_url, options) => {
+      requestedTokens = JSON.parse(options.body).max_tokens;
+      return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{"answer":"观察完成","sourceIds":[]}' } }] }), { status: 200 });
+    };
+    await generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-30' }, fetchImpl);
+    assert.ok(requestedTimeout >= 180000);
+    assert.ok(requestedTokens >= 6000);
+  } finally { AbortSignal.timeout = original; }
+}));
+
+test('evaluation does not save an incomplete JSON response', () => setup(async db => {
+  saveActivity(db, { categoryId: 'sports', occurredAt: '2026-10-12T16:20:00+08:00', localDate: '2026-10-12', note: '骑车' });
+  const fetchImpl = async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"answer":"【当前观察】（基于' } }] }), { status: 200 });
+  await assert.rejects(generateEvaluation(db, config, { from: '2026-10-01', to: '2026-10-30' }, fetchImpl), /截断|不完整/);
+  assert.equal(listEvaluations(db).length, 0);
+}));
